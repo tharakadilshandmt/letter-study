@@ -352,7 +352,22 @@ function loadTask(){
   $("lname").textContent = t.letter;
   $("limg").src = REFS[t.letter].images[t.ref];
   blank(); strokes = []; drawSnaps = []; cleanImage = null; $("toDamage").disabled = true;
+  mixTools();
   setStep("draw");
+}
+// each letter: damage tools in a new random order, the first one picked, and a random starting tool size,
+// so people do not repeat the same habit for every letter
+let toolOrder = [], startSize = 24;
+function mixTools(){
+  const row = document.querySelector("#damageTools .toolrow");
+  const btns = shuffle(Array.from(row.querySelectorAll(".tool")));
+  btns.forEach(b => row.appendChild(b));
+  toolOrder = btns.map(b => b.dataset.tool);
+  tool = toolOrder[0];
+  btns.forEach((b, i) => b.classList.toggle("on", i === 0));
+  const d = $("dsize"), lo = +d.min, hi = +d.max;
+  startSize = Math.round(lo + 4 + Math.random() * (hi - lo - 8));
+  d.value = startSize;
 }
 function small(img, size){   // a smaller copy of the canvas as a PNG data URL (keeps records light)
   const c = document.createElement("canvas"); c.width = c.height = size;
@@ -363,6 +378,7 @@ function save(){
   if (!actions.length){ $("msg").textContent = "Please damage the drawing before saving."; return; }
   const t = tasks[cur];
   const rec = {study: "brahmi-letter-damage", participant, task: cur + 1, letter: t.letter, reference: t.ref, ink_removed: +removedShare().toFixed(3),
+               tool_order: toolOrder, start_size: startSize,
                clean: small(cleanImage, 256), damaged: small(snap(), 256),
                strokes: strokes.map(s => s.map(p => [Math.round(p.x), Math.round(p.y), p.t])),
                actions: actions.map(a => ({tool: a.tool, size: a.size, points: a.points.map(p => [Math.round(p.x), Math.round(p.y)])})),
