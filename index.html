@@ -77,6 +77,46 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .stage small{display:block;font-size:13px;color:var(--muted);line-height:1.35}
 .tool:disabled{opacity:.35}
 .msg{min-height:22px;font-size:14px;color:var(--heavy);text-align:center}
+.stagepct{display:none !important}
+.tooldesc{display:none;font-size:13px;color:var(--muted)}
+/* phones: letter, drawing area and tools all on one screen without scrolling */
+@media (max-width:700px){
+  .wrap{padding-block:8px 8px}
+  .top{margin-bottom:6px;gap:8px}
+  .top strong{font-size:14px}
+  .tabs span{padding:3px 9px;font-size:12px}
+  .prog{min-width:80px;height:6px}
+  .work{gap:6px;grid-template-columns:minmax(0,1fr)}
+  .work > *{min-width:0}
+  .card{padding:8px 10px;border-radius:10px}
+  .ref{display:grid;grid-template-columns:64px minmax(0,1fr);column-gap:10px;align-items:center}
+  .ref > p.muted:first-child{display:none}
+  .ref img{grid-row:1 / span 2;grid-column:1;width:64px;border-radius:6px}
+  .ref .name{grid-column:2;font-size:20px;margin:0;line-height:1.1}
+  .ref #refhint{grid-column:2;margin-top:0 !important;font-size:12.5px !important;line-height:1.3}
+  .board{gap:2px}
+  canvas{width:min(100%, max(220px, calc(100svh - 455px)));border-radius:10px}
+  #hint{display:none}
+  .msg{min-height:0;font-size:13px}
+  .msg:empty, #netmsg:empty{display:none}
+  .tools{gap:6px}
+  .tools h2{display:none}
+  .toolrow{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+  .tool{padding:7px 6px;font-size:13.5px;align-items:center;text-align:center}
+  .tool small{display:none}
+  .tooldesc{display:block}
+  label.slider{flex-direction:row;align-items:center;gap:8px;font-size:13px;white-space:nowrap}
+  label.slider input{min-width:0;flex:1}
+  .top .tabs{margin-left:auto}
+  .meter{display:none}
+  .stagepct{display:inline !important;color:var(--muted)}
+  .stage{padding:4px 8px;gap:8px}
+  .stage .dot{width:11px;height:11px;margin-top:4px}
+  .stage b{font-size:13.5px;display:inline}
+  .stage small{font-size:12px;display:inline;margin-left:4px}
+  .actions{gap:5px;flex-wrap:nowrap}
+  .actions button{padding:8px 10px;font-size:14px}
+}
 </style>
 </head>
 <body>
@@ -134,10 +174,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
           <button class="tool" data-tool="pitting" type="button">Specks<small>rub: small holes, dust</small></button>
           <button class="tool" data-tool="stain" type="button">Stain<small>rub: dirt or old marks</small></button>
         </div>
+        <p class="tooldesc" id="tooldesc"></p>
         <label class="slider" for="dsize">Tool size <input id="dsize" type="range" min="6" max="60" value="24"></label>
-        <div class="meter"><span>Ink removed</span><b id="removed">0%</b></div>
+        <div class="meter"><span>Damage</span><b id="removed">0%</b></div>
         <div class="limitbar" id="limitbar" aria-hidden="true"><i id="limitfill"></i></div>
-        <div class="stage" id="stage" aria-live="polite"><span class="dot" id="stagedot"></span><div><b id="stagename">Not damaged yet</b><small id="stagetip">Pick a tool and rub over the letter.</small></div></div>
+        <div class="stage" id="stage" aria-live="polite"><span class="dot" id="stagedot"></span><div><b id="stagename">Not damaged yet</b> <b class="stagepct" id="stagepct">0%</b><small id="stagetip">Pick a tool and rub over the letter.</small></div></div>
         <div class="actions"><button id="undoX" type="button">Undo</button><button id="resetX" type="button">Reset damage</button></div>
         <div class="actions"><button id="backDraw" type="button">← Redraw</button><button class="primary grow" id="save" type="button">Save and next →</button></div>
       </div>
@@ -179,7 +220,14 @@ function blank(){ ctx.globalCompositeOperation = "source-over"; ctx.fillStyle = 
 function pos(e){ const r = cv.getBoundingClientRect(); return {x: (e.clientX - r.left) * N / r.width, y: (e.clientY - r.top) * N / r.height, t: Math.round(performance.now())}; }
 function snap(){ return ctx.getImageData(0, 0, N, N); }
 function inkCount(img){ let n = 0; const d = img.data; for (let i = 0; i < d.length; i += 4) if (d[i] < 128) n++; return n; }
+// damage = how much of the letter's darkness is gone: a stroke faded to mid-grey counts as about half removed
 function removedShare(){
+  if (!cleanImage) return 0;
+  const a = cleanImage.data, b = snap().data; let ink = 0, lost = 0;
+  for (let i = 0; i < a.length; i += 4){ if (a[i] < 128){ const d = 255 - a[i]; ink += d; lost += Math.max(0, Math.min(d, b[i] - a[i])); } }
+  return ink ? lost / ink : 0;
+}
+function fadedShare(){   // the older, stricter measure: ink pixels that turned lighter than mid-grey (kept for the records)
   if (!cleanImage) return 0;
   const a = cleanImage.data, b = snap().data; let ink = 0, gone = 0;
   for (let i = 0; i < a.length; i += 4){ if (a[i] < 128){ ink++; if (b[i] >= 128) gone++; } }
@@ -188,11 +236,11 @@ function removedShare(){
 // damage stages by share of the letter's ink removed. People stop wherever they like; the last stage locks the tools
 // so the letter stays readable.
 const STAGES = [
-  {upto: 0.03, name: "Not damaged yet",  tip: "Pick a tool and rub over the letter.",                         color: "#9a9a94"},
-  {upto: 0.10, name: "A little worn",    tip: "Fine to save, or keep going.",                                 color: "#4f9a6b"},
-  {upto: 0.20, name: "Clearly worn",     tip: "Looks old. Fine to save, or keep going.",                      color: "#8a9a2a"},
-  {upto: 0.30, name: "Heavily worn",     tip: "Still readable? Then it is fine.",                             color: "#c58a1f"},
-  {upto: 0.45, name: "Very damaged",     tip: "Nearly too much: an expert must still read it.",               color: "#d0682a"},
+  {upto: 0.04, name: "Not damaged yet",  tip: "Pick a tool and rub over the letter.",                         color: "#9a9a94"},
+  {upto: 0.20, name: "A little worn",    tip: "Fine to save, or keep going.",                                 color: "#4f9a6b"},
+  {upto: 0.40, name: "Clearly worn",     tip: "Looks old. Fine to save, or keep going.",                      color: "#8a9a2a"},
+  {upto: 0.60, name: "Heavily worn",     tip: "Still readable? Then it is fine.",                             color: "#c58a1f"},
+  {upto: 0.80, name: "Very damaged",     tip: "Nearly too much: an expert must still read it.",               color: "#d0682a"},
   {upto: 9,    name: "That's the limit", tip: "Damage tools are off now. Save, or use Undo to step back.",    color: "#b54a3a"},
 ];
 const LIMIT = STAGES[STAGES.length - 2].upto;
@@ -204,7 +252,7 @@ let locked = false, stageNow = STAGES[0];
 function showRemoved(){
   const r = removedShare();
   stageNow = STAGES.find(st => r < st.upto) || STAGES[STAGES.length - 1];
-  $("removed").textContent = Math.round(100 * r) + "%";
+  $("removed").textContent = $("stagepct").textContent = Math.round(100 * r) + "%";
   $("limitfill").style.width = Math.min(100, 100 * r / LIMIT) + "%";
   $("limitfill").style.background = stageNow.color;
   $("stagedot").style.background = stageNow.color;
@@ -337,7 +385,7 @@ function rub(p, size, from){
   }
 }
 document.querySelectorAll(".tool").forEach(b => b.addEventListener("click", () => {
-  tool = b.dataset.tool;
+  tool = b.dataset.tool; showToolDesc();
   document.querySelectorAll(".tool").forEach(x => x.classList.toggle("on", x === b));
 }));
 
@@ -375,12 +423,16 @@ function loadTask(){
 // each letter: damage tools in a new random order, the first one picked, and a random starting tool size,
 // so people do not repeat the same habit for every letter
 let toolOrder = [], startSize = 24;
+function showToolDesc(){
+  const b = document.querySelector(`.tool[data-tool="${tool}"]`);
+  $("tooldesc").textContent = b ? b.firstChild.textContent.trim() + ": " + b.querySelector("small").textContent : "";
+}
 function mixTools(){
   const row = document.querySelector("#damageTools .toolrow");
   const btns = shuffle(Array.from(row.querySelectorAll(".tool")));
   btns.forEach(b => row.appendChild(b));
   toolOrder = btns.map(b => b.dataset.tool);
-  tool = toolOrder[0];
+  tool = toolOrder[0]; showToolDesc();
   btns.forEach((b, i) => b.classList.toggle("on", i === 0));
   const d = $("dsize"), lo = +d.min, hi = +d.max;
   startSize = Math.round(lo + 4 + Math.random() * (hi - lo - 8));
@@ -394,7 +446,7 @@ function small(img, size){   // a smaller copy of the canvas as a PNG data URL (
 function save(){
   if (!actions.length || removedShare() < STAGES[0].upto){ $("msg").textContent = "Please damage the drawing a little more before saving."; return; }
   const t = tasks[cur];
-  const rec = {study: "brahmi-letter-damage", participant, task: cur + 1, letter: t.letter, reference: t.ref, ink_removed: +removedShare().toFixed(3),
+  const rec = {study: "brahmi-letter-damage", participant, task: cur + 1, letter: t.letter, reference: t.ref, ink_removed: +removedShare().toFixed(3), pixels_faded: +fadedShare().toFixed(3),
                tool_order: toolOrder, start_size: startSize, stage: stageNow.name,
                clean: small(cleanImage, 256), damaged: small(snap(), 256),
                strokes: strokes.map(s => s.map(p => [Math.round(p.x), Math.round(p.y), p.t])),
