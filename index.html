@@ -95,9 +95,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     </div>
     <p>You will do this for <b>8 letters</b>, one picture each. Your drawings are used only to test computer
       models. We do not collect your name or email.</p>
-    <div class="actions"><button class="primary" id="start" type="button">Start</button>
-      <button id="dl1" type="button" hidden>Download my drawings</button></div>
-    <p class="muted" id="dlmsg1"></p>
+    <div class="actions"><button class="primary" id="start" type="button">Start</button></div>
   </section>
 
   <!-- 2. task -->
@@ -150,9 +148,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     <h1>Thank you!</h1>
     <p>You finished all 8 letters. Your drawings help us test how well computer models read damaged Brahmi letters.</p>
     <p class="muted" id="doneNote"></p>
-    <button class="primary" id="dl2" type="button">Download my drawings</button>
-    <p class="muted" id="dlmsg2"></p>
-    <p class="muted" style="font-size:14px">Your pictures were sent automatically. The download is only a backup copy.</p>
+    <p class="muted" style="font-size:14px">Your pictures were sent automatically. You can close this page.</p>
   </section>
 </div>
 
@@ -427,7 +423,7 @@ function resendUnsent(){
   savedRecords().forEach(r => { try { if (!localStorage.getItem(sentKey(r))) send(r); } catch (e) {} });
 }
 
-// ---------- download everything this browser saved (every finished picture of every session on this device)
+// ---------- every finished picture this browser kept (used to resend pictures that did not go through)
 function savedRecords(){
   const out = [];
   try {
@@ -438,31 +434,7 @@ function savedRecords(){
   } catch (e) {}
   return out;
 }
-async function download(msgId){
-  const recs = savedRecords();
-  const msg = $(msgId);
-  if (!recs.length){ msg.textContent = "No saved drawings were found in this browser."; return; }
-  const codes = [...new Set(recs.map(r => r.participant))].join("_");
-  const file = {study: "brahmi-letter-damage", version: 1, exported_at: new Date().toISOString(), records: recs};
-  const text = JSON.stringify(file);
-  const name = `brahmi_drawings_${codes}.json`;
-  try {
-    const dl = window.claude ? await claude.use("downloads") : null;
-    if (dl) await dl.save({filename: name, data: text});
-    else {   // a normal website: an ordinary file download
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([text], {type: "application/json"})); a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-    }
-    msg.textContent = `Saved ${recs.length} pictures as ${name}.`;
-  } catch (e) {
-    msg.textContent = "The download did not start. Please try again, or use another browser.";
-  }
-}
-$("dl1").onclick = () => download("dlmsg1");
-$("dl2").onclick = () => download("dlmsg2");
 resendUnsent();
-if (savedRecords().length){ $("dl1").hidden = false; $("dlmsg1").textContent = `This browser has ${savedRecords().length} saved pictures.`; }
 blank();
 </script>
 
