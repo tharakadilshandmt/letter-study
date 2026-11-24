@@ -67,6 +67,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .actions .grow{flex:1}
 .done-card{max-width:560px;margin:8vh auto 0;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}
+.limitbar{position:relative;height:8px;border-radius:99px;background:var(--chip);overflow:hidden}
+.limitbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+.limitbar i.full{background:var(--heavy)}
+.limitmsg{font-size:14px;font-weight:600;color:var(--heavy)}
+.tool:disabled{opacity:.35}
 .msg{min-height:22px;font-size:14px;color:var(--heavy);text-align:center}
 </style>
 </head>
@@ -78,14 +83,14 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   <section id="welcome" class="welcome">
     <div>
       <h1>Help us test a Brahmi letter reader</h1>
-      <p class="muted">A research project at the University of Peradeniya. It takes about 15 minutes.</p>
+      <p class="muted">A research project at the University of Peradeniya. It takes about 8 minutes.</p>
     </div>
     <div class="steps3">
       <div><b>1 · Look</b>We show you an ancient Brahmi letter.</div>
       <div><b>2 · Draw</b>You draw it in your own hand.</div>
       <div><b>3 · Damage</b>You make it look old and worn, like a damaged letter.</div>
     </div>
-    <p>You will do this for <b>16 pictures</b> (8 letters, twice each). Your drawings are used only to test computer
+    <p>You will do this for <b>8 letters</b>, one picture each. Your drawings are used only to test computer
       models. We do not collect your name or email.</p>
     <div class="actions"><button class="primary" id="start" type="button">Start</button>
       <button id="dl1" type="button" hidden>Download my drawings</button></div>
@@ -95,7 +100,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   <!-- 2. task -->
   <section id="task" hidden>
     <div class="top">
-      <strong id="count">Picture 1 of 16</strong>
+      <strong id="count">Letter 1 of 8</strong>
       <div class="prog" aria-hidden="true"><i id="bar"></i></div>
       <div class="tabs"><span id="tab1">① Draw</span><span id="tab2">② Damage</span></div>
     </div>
@@ -129,6 +134,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         </div>
         <label class="slider" for="dsize">Tool size <input id="dsize" type="range" min="6" max="60" value="24"></label>
         <div class="meter"><span>Ink removed</span><b id="removed">0%</b></div>
+        <div class="limitbar" aria-hidden="true"><i id="limitfill"></i><span class="cap"></span></div>
+        <p class="limitmsg" id="limitmsg" hidden>That's enough damage: the letter must stay readable. Use Undo to step back, or save.</p>
         <div class="actions"><button id="undoX" type="button">Undo</button><button id="resetX" type="button">Reset damage</button></div>
         <div class="actions"><button id="backDraw" type="button">← Redraw</button><button class="primary grow" id="save" type="button">Save and next →</button></div>
       </div>
@@ -138,7 +145,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   <!-- 3. done -->
   <section id="done" class="done-card" hidden>
     <h1>Thank you!</h1>
-    <p>You finished all 16 pictures. Your drawings help us test how well computer models read damaged Brahmi letters.</p>
+    <p>You finished all 8 letters. Your drawings help us test how well computer models read damaged Brahmi letters.</p>
     <p class="muted" id="doneNote"></p>
     <button class="primary" id="dl2" type="button">Download my drawings</button>
     <p class="muted" id="dlmsg2"></p>
@@ -158,12 +165,12 @@ const N = cv.width;
 function shuffle(a){ for (let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function code(){ return "P" + Math.random().toString(36).slice(2, 8).toUpperCase(); }
 
-// 16 tasks: each letter twice, levels 5 light / 6 medium / 5 heavy, all in random order
+// 8 tasks: each letter once, in random order
 let participant = code(), tasks = [], cur = 0, step = "draw", results = [];
 function makeTasks(){
   // each letter twice, each time with a DIFFERENT reference picture (12 per letter), so people draw from varied examples
   const pics = {}; LETTERS.forEach(l => { pics[l] = shuffle([...REFS[l].images.keys()]); });
-  return shuffle(LETTERS.concat(LETTERS)).map(l => ({letter: l, ref: pics[l].pop()}));
+  return shuffle(LETTERS.slice()).map(l => ({letter: l, ref: pics[l].pop()}));   // each letter once
 }
 
 // ---------- canvas helpers
@@ -178,7 +185,22 @@ function removedShare(){
   for (let i = 0; i < a.length; i += 4){ if (a[i] < 128){ ink++; if (b[i] >= 128) gone++; } }
   return ink ? gone / ink : 0;
 }
-function showRemoved(){ $("removed").textContent = Math.round(100 * removedShare()) + "%"; }
+const LIMIT = 0.45;   // at most 45% of the letter's ink may be removed: the letter must stay readable
+let locked = false;
+function showRemoved(){
+  const r = removedShare();
+  $("removed").textContent = Math.round(100 * r) + "%";
+  $("limitfill").style.width = Math.min(100, 100 * r / LIMIT) + "%";
+  $("limitfill").classList.toggle("full", r >= LIMIT);
+  setLocked(r >= LIMIT);
+  return r;
+}
+function setLocked(v){
+  locked = v;
+  document.querySelectorAll(".tool").forEach(b => { b.disabled = v; });
+  $("dsize").disabled = v;
+  $("limitmsg").hidden = !v;
+}
 
 // ---------- drawing
 function penDown(e){
@@ -190,6 +212,7 @@ function penDown(e){
     ctx.strokeStyle = "#111"; ctx.lineWidth = +$("penw").value; ctx.lineCap = ctx.lineJoin = "round";
     ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + .1, p.y); ctx.stroke();
   } else {
+    if (locked) return;
     dmgSnaps.push(snap());
     drawing = [p];
     const size = +$("dsize").value;
@@ -202,9 +225,12 @@ function penMove(e){
   const p = pos(e), last = drawing[drawing.length - 1];
   drawing.push(p);
   if (step === "draw"){ ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); return; }
+  if (locked){ drawing = null; return; }
   const size = +$("dsize").value;
-  if (Math.hypot(p.x - last.x, p.y - last.y) > size * 0.2) rub(p, size, last);
-  else drawing.pop();
+  if (Math.hypot(p.x - last.x, p.y - last.y) > size * 0.2){
+    rub(p, size, last);
+    if (drawing.length % 4 === 0 && showRemoved() >= LIMIT) drawing = null;   // stop at the limit, mid-stroke too
+  } else drawing.pop();
 }
 function penUp(){
   if (!drawing) return;
@@ -311,7 +337,7 @@ $("start").onclick = () => { tasks = makeTasks(); cur = 0; $("welcome").hidden =
 function setStep(s){
   step = s;
   const dmg = s === "damage";
-  if (dmg){ cleanImage = snap(); dmgSnaps = []; actions = []; showRemoved(); }
+  if (dmg){ cleanImage = snap(); dmgSnaps = []; actions = []; showRemoved(); } else setLocked(false);
   $("drawTools").hidden = dmg; $("damageTools").hidden = !dmg;
   $("tab1").className = dmg ? "done" : "on"; $("tab2").className = dmg ? "on" : "";
   $("hint").textContent = dmg ? "Make your drawing look old and damaged, in your own way: worn, smudged, wet or dirty."
@@ -321,7 +347,7 @@ function setStep(s){
 }
 function loadTask(){
   const t = tasks[cur];
-  $("count").textContent = `Picture ${cur + 1} of ${tasks.length}`;
+  $("count").textContent = `Letter ${cur + 1} of ${tasks.length}`;
   $("bar").style.width = (100 * cur / tasks.length) + "%";
   $("lname").textContent = t.letter;
   $("limg").src = REFS[t.letter].images[t.ref];
